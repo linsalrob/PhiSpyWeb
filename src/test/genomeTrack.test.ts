@@ -77,6 +77,45 @@ describe("buildContigLayouts", () => {
     // its alias "NZ_CP012345.1" is already in the map
     expect(layouts).toHaveLength(1);
   });
+
+  it("normalises alias IDs to canonical LOCUS name", () => {
+    // PhiSpy uses the BioPython record.id (VERSION) as the contig identifier.
+    // buildContigLayouts should map that alias to the canonical LOCUS name so
+    // the prophage appears on the correct row and the label matches the GBFF file.
+    const coords = [{ contig: "NZ_CP012345.1", start: 5000, stop: 10000, raw: {} }];
+    const parsedLengths = {
+      byId: new Map([["MyLocus", 100000], ["NZ_CP012345.1", 100000]]),
+      canonical: [{ name: "MyLocus", length: 100000, aliases: ["NZ_CP012345.1"] }],
+    };
+    const layouts = buildContigLayouts(coords, parsedLengths);
+    expect(layouts).toHaveLength(1);
+    expect(layouts[0].contig).toBe("MyLocus");
+    expect(layouts[0].prophages).toHaveLength(1);
+    expect(layouts[0].prophages[0].start).toBe(5000);
+  });
+
+  it("places prophages on the correct contig when contig IDs use VERSION format", () => {
+    // Two contigs: one with a prophage (VERSION alias), one without
+    const coords = [{ contig: "CP001.1", start: 1000, stop: 2000, raw: {} }];
+    const parsedLengths = {
+      byId: new Map([
+        ["Locus1", 50000], ["CP001.1", 50000],
+        ["Locus2", 30000], ["CP002.1", 30000],
+      ]),
+      canonical: [
+        { name: "Locus1", length: 50000, aliases: ["CP001.1"] },
+        { name: "Locus2", length: 30000, aliases: ["CP002.1"] },
+      ],
+    };
+    const layouts = buildContigLayouts(coords, parsedLengths);
+    expect(layouts).toHaveLength(2);
+    const locus1 = layouts.find((l) => l.contig === "Locus1");
+    const locus2 = layouts.find((l) => l.contig === "Locus2");
+    expect(locus1).toBeDefined();
+    expect(locus2).toBeDefined();
+    expect(locus1?.prophages).toHaveLength(1);
+    expect(locus2?.prophages).toHaveLength(0);
+  });
 });
 
 describe("coordToX", () => {
