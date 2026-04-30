@@ -32,7 +32,15 @@ export interface PhiSpyRunParameters {
   windowSize: number;
   minContigSize: number;
   outputChoice: number;
+  trainingSet: string;
 }
+
+export type PhiSpyTrainingSetOption = {
+  value: string;
+  label: string;
+  count?: number;
+  genomeFile: string;
+};
 
 export type RunState =
   | "idle"
@@ -48,4 +56,5 @@ export const defaultParams: PhiSpyRunParameters = {
   windowSize: 30,
   minContigSize: 5000,
   outputChoice: 512,
+  trainingSet: "",
 };

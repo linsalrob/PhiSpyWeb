@@ -428,6 +428,37 @@ except ImportError:
 
   phispyReady = true;
   postStatus("Pyodide and PhiSpy are ready");
+
+  // Fetch training sets and send them to the main thread
+  postStatus("Loading PhiSpy training sets");
+  try {
+    const trainingSetsText = await pyodide.runPythonAsync(`
+import sys
+import io
+import contextlib
+from PhiSpyModules.main import run
+
+buffer = io.StringIO()
+
+old_argv = sys.argv[:]
+try:
+    sys.argv = ["PhiSpy.py", "--list", "short"]
+    with contextlib.redirect_stdout(buffer):
+        run()
+finally:
+    sys.argv = old_argv
+
+buffer.getvalue()
+`);
+    postStatus("Loaded PhiSpy training sets");
+    postMessage({ type: "training_sets", text: String(trainingSetsText) });
+  } catch (err) {
+    postStatus("Could not load PhiSpy training sets (non-fatal)", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    postMessage({ type: "training_sets", text: "" });
+  }
+
   postMessage({ type: "status", message: "ready", timestamp: new Date().toISOString(), elapsedMs: Math.round(performance.now() - initStart) });
 }
 
@@ -439,6 +470,7 @@ async function runPhiSpyInPyodide(
     windowSize: number;
     minContigSize: number;
     outputChoice: number;
+    trainingSet: string;
   }
 ): Promise<void> {
   if (!pyodide) throw new Error("Pyodide not initialised");
@@ -481,11 +513,13 @@ phage_genes = ${params.phageGenes}
 window_size = ${params.windowSize}
 min_contig_size = ${params.minContigSize}
 output_choice = ${params.outputChoice}
+training_set = ${JSON.stringify(params.trainingSet)}
 
 sys.argv = [
     "PhiSpy.py",
     input_path,
     "-o", output_dir,
+    "--training_set", training_set,
     "--phage_genes", str(phage_genes),
     "--window_size", str(window_size),
     "--min_contig_size", str(min_contig_size),

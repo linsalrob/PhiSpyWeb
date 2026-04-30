@@ -8,8 +8,9 @@ import { GenomeTrack } from "./components/GenomeTrack";
 import { OutputDownloads } from "./components/OutputDownloads";
 import { LogViewer } from "./components/LogViewer";
 import { PhiSpyWorkerClient } from "./lib/workerClient";
-import type { PhiSpyRunParameters, PhiSpyRunResult, RunState } from "./lib/phispyTypes";
+import type { PhiSpyRunParameters, PhiSpyRunResult, PhiSpyTrainingSetOption, RunState } from "./lib/phispyTypes";
 import { defaultParams } from "./lib/phispyTypes";
+import { parseTrainingSetList, FALLBACK_TRAINING_SETS } from "./lib/parseTrainingSets";
 import type { ParsedContigLengths } from "./lib/genomeTrack";
 import { parseContigLengthsFromGenBank } from "./lib/genomeTrack";
 
@@ -24,6 +25,9 @@ export default function App() {
   const [parsedLengths, setParsedLengths] = useState<ParsedContigLengths | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [errorDetails, setErrorDetails] = useState<string | undefined>();
+  const [trainingSets, setTrainingSets] = useState<PhiSpyTrainingSetOption[]>([]);
+  const [trainingSetsLoading, setTrainingSetsLoading] = useState(true);
+  const [trainingSetsError, setTrainingSetsError] = useState(false);
 
   const workerRef = useRef<PhiSpyWorkerClient | null>(null);
 
@@ -47,6 +51,30 @@ export default function App() {
     } else {
       setStderr((prev) => [...prev, text]);
     }
+  }, []);
+
+  const handleTrainingSets = useCallback((text: string) => {
+    const preferredDefault = "data/trainSet_Ecoli.txt";
+    let options: PhiSpyTrainingSetOption[];
+    if (text.trim()) {
+      try {
+        options = parseTrainingSetList(text);
+      } catch {
+        options = FALLBACK_TRAINING_SETS;
+        setTrainingSetsError(true);
+      }
+    } else {
+      options = FALLBACK_TRAINING_SETS;
+    }
+    const defaultTrainingSet =
+      options.find((o) => o.value === preferredDefault)?.value ??
+      options[0]?.value ??
+      "";
+    setTrainingSets(options);
+    setTrainingSetsLoading(false);
+    setParams((prev) =>
+      prev.trainingSet === "" ? { ...prev, trainingSet: defaultTrainingSet } : prev
+    );
   }, []);
 
   const handleRun = async () => {
@@ -76,7 +104,8 @@ export default function App() {
             setRunState("installing");
           }
         },
-        addLog
+        addLog,
+        handleTrainingSets
       );
 
       setRunState("running");
@@ -153,6 +182,9 @@ export default function App() {
               params={params}
               onChange={setParams}
               disabled={isRunning}
+              trainingSets={trainingSets}
+              trainingSetsLoading={trainingSetsLoading}
+              trainingSetsError={trainingSetsError}
             />
           </div>
         </div>
