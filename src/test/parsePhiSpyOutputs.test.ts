@@ -55,6 +55,42 @@ phage1\tcontig1\t500\t1500
     expect(result[0].start).toBe(500);
     expect(result[0].stop).toBe(1500);
   });
+
+  it("parses PhiSpy headerless prophage_coordinates.tsv (positional columns)", () => {
+    // PhiSpy writes prophage_coordinates.tsv without a header row.
+    // Columns are: pp{n}, contig, start, stop, att
+    const tsv = `pp1\tNZ_CP012345.1\t10000\t25000\t\npp2\tNZ_CP012345.1\t80000\t95000\t`;
+    const result = parseProphageCoordinates(tsv);
+    expect(result).toHaveLength(2);
+    expect(result[0].prophage).toBe("pp1");
+    expect(result[0].contig).toBe("NZ_CP012345.1");
+    expect(result[0].start).toBe(10000);
+    expect(result[0].stop).toBe(25000);
+    expect(result[0].length).toBe(15000);
+    expect(result[1].prophage).toBe("pp2");
+    expect(result[1].contig).toBe("NZ_CP012345.1");
+    expect(result[1].start).toBe(80000);
+    expect(result[1].stop).toBe(95000);
+  });
+
+  it("positional parsing uses 'pp' column name in raw", () => {
+    const tsv = `pp1\tNZ_CP012345.1\t10000\t25000`;
+    const result = parseProphageCoordinates(tsv);
+    expect(result[0].raw["pp"]).toBe("pp1");
+    expect(result[0].raw["contig"]).toBe("NZ_CP012345.1");
+    expect(result[0].raw["start"]).toBe("10000");
+    expect(result[0].raw["stop"]).toBe("25000");
+  });
+
+  it("header-based parsing recognises pp column name", () => {
+    const tsv = `pp\tcontig\tstart\tstop\npp1\tNC_000913\t5000\t10000\n`;
+    const result = parseProphageCoordinates(tsv);
+    expect(result).toHaveLength(1);
+    expect(result[0].prophage).toBe("pp1");
+    expect(result[0].contig).toBe("NC_000913");
+    expect(result[0].start).toBe(5000);
+    expect(result[0].stop).toBe(10000);
+  });
 });
 
 describe("mimeTypeForFile", () => {

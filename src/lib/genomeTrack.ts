@@ -76,13 +76,33 @@ export function buildContigLayouts(
 ): ContigLayout[] {
   const map = new Map<string, ContigLayout>();
 
+  // Build a fast lookup: any known ID → canonical record name
+  const aliasToCanonical = new Map<string, string>();
+  if (parsedLengths) {
+    for (const record of parsedLengths.canonical) {
+      aliasToCanonical.set(record.name, record.name);
+      for (const alias of record.aliases) {
+        aliasToCanonical.set(alias, record.name);
+      }
+    }
+  }
+
   for (const coord of coordinates) {
-    const contig = coord.contig ?? "unknown";
+    const rawContig = coord.contig ?? "unknown";
+    // Resolve to the canonical LOCUS name when GenBank data is available so that
+    // prophages always land on the same row as the GenBank contig, regardless of
+    // which ID format (LOCUS, ACCESSION, VERSION) PhiSpy used in its output.
+    const contig =
+      rawContig !== "unknown"
+        ? (aliasToCanonical.get(rawContig) ?? rawContig)
+        : "unknown";
     const start = coord.start ?? 0;
     const stop = coord.stop ?? 0;
 
     if (!map.has(contig)) {
-      const knownLength = parsedLengths?.byId.get(contig) ?? 0;
+      // byId contains every known ID (LOCUS, ACCESSION, VERSION), so rawContig
+      // is always the right key regardless of whether normalization occurred.
+      const knownLength = parsedLengths?.byId.get(rawContig) ?? 0;
       map.set(contig, { contig, length: knownLength, prophages: [] });
     }
 
@@ -92,20 +112,17 @@ export function buildContigLayouts(
       start,
       stop,
     });
-    // Only estimate length from coordinates when no real length was provided
-    if (!parsedLengths?.byId.has(contig)) {
+    // Only estimate length from coordinates when no real length was provided.
+    // byId contains all known IDs, so rawContig is the right key to check.
+    if (!parsedLengths?.byId.has(rawContig)) {
       layout.length = Math.max(layout.length, stop, start);
     }
   }
 
   // Add contigs from GenBank that have no prophages.
-  // Check all aliases so we don't duplicate a contig that was already added
-  // under a different ID (e.g. coordinates use VERSION, canonical uses LOCUS).
   if (parsedLengths) {
     for (const record of parsedLengths.canonical) {
-      const allIds = [record.name, ...record.aliases];
-      const alreadyAdded = allIds.some((id) => map.has(id));
-      if (!alreadyAdded) {
+      if (!map.has(record.name)) {
         map.set(record.name, { contig: record.name, length: record.length, prophages: [] });
       }
     }
