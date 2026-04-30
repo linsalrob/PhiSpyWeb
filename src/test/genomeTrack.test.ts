@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildContigLayouts, coordToX } from "../lib/genomeTrack";
+import { buildContigLayouts, coordToX, parseContigLengthsFromGenBank } from "../lib/genomeTrack";
 
 describe("buildContigLayouts", () => {
   it("groups coordinates by contig", () => {
@@ -25,6 +25,58 @@ describe("buildContigLayouts", () => {
     const layouts = buildContigLayouts(coords);
     expect(layouts[0].length).toBeGreaterThanOrEqual(50000);
   });
+
+  it("sorts contigs by length descending", () => {
+    const coords = [
+      { contig: "short", start: 0, stop: 1000, raw: {} },
+      { contig: "long", start: 0, stop: 10000, raw: {} },
+      { contig: "medium", start: 0, stop: 5000, raw: {} },
+    ];
+    const layouts = buildContigLayouts(coords);
+    expect(layouts[0].contig).toBe("long");
+    expect(layouts[1].contig).toBe("medium");
+    expect(layouts[2].contig).toBe("short");
+  });
+
+  it("uses provided contig lengths when available", () => {
+    const coords = [
+      { contig: "c1", start: 0, stop: 1000, raw: {} },
+    ];
+    const parsedLengths = {
+      byId: new Map([["c1", 50000]]),
+      canonical: [{ name: "c1", length: 50000, aliases: [] }],
+    };
+    const layouts = buildContigLayouts(coords, parsedLengths);
+    expect(layouts[0].length).toBe(50000);
+  });
+
+  it("includes contigs from GenBank that have no prophages", () => {
+    const coords = [{ contig: "c1", start: 0, stop: 1000, raw: {} }];
+    const parsedLengths = {
+      byId: new Map([["c1", 10000], ["c2", 8000]]),
+      canonical: [
+        { name: "c1", length: 10000, aliases: [] },
+        { name: "c2", length: 8000, aliases: [] },
+      ],
+    };
+    const layouts = buildContigLayouts(coords, parsedLengths);
+    expect(layouts).toHaveLength(2);
+    const c2 = layouts.find((l) => l.contig === "c2");
+    expect(c2).toBeDefined();
+    expect(c2?.prophages).toHaveLength(0);
+  });
+
+  it("does not duplicate a contig that coordinates reference under an alias", () => {
+    const coords = [{ contig: "NZ_CP012345.1", start: 0, stop: 1000, raw: {} }];
+    const parsedLengths = {
+      byId: new Map([["MyLocus", 10000], ["NZ_CP012345.1", 10000]]),
+      canonical: [{ name: "MyLocus", length: 10000, aliases: ["NZ_CP012345.1"] }],
+    };
+    const layouts = buildContigLayouts(coords, parsedLengths);
+    // The canonical LOCUS "MyLocus" should NOT be added separately since
+    // its alias "NZ_CP012345.1" is already in the map
+    expect(layouts).toHaveLength(1);
+  });
 });
 
 describe("coordToX", () => {
@@ -38,5 +90,57 @@ describe("coordToX", () => {
 
   it("maps midpoint correctly", () => {
     expect(coordToX(500, 1000, 800)).toBe(400);
+  });
+});
+
+describe("parseContigLengthsFromGenBank", () => {
+  const minimalGenBank = [
+    "LOCUS       MyContig1          10000 bp    DNA     linear   BCT 01-JAN-2020",
+    "ACCESSION   NC_000001",
+    "VERSION     NC_000001.1",
+    "ORIGIN",
+    "//",
+    "LOCUS       MyContig2           5000 bp    DNA     linear   BCT 01-JAN-2020",
+    "ACCESSION   NC_000002",
+    "VERSION     NC_000002.1",
+    "ORIGIN",
+    "//",
+  ].join("\n");
+
+  it("parses LOCUS lengths", () => {
+    const result = parseContigLengthsFromGenBank(minimalGenBank);
+    expect(result.byId.get("MyContig1")).toBe(10000);
+    expect(result.byId.get("MyContig2")).toBe(5000);
+  });
+
+  it("maps VERSION aliases", () => {
+    const result = parseContigLengthsFromGenBank(minimalGenBank);
+    expect(result.byId.get("NC_000001.1")).toBe(10000);
+    expect(result.byId.get("NC_000002.1")).toBe(5000);
+  });
+
+  it("maps ACCESSION aliases", () => {
+    const result = parseContigLengthsFromGenBank(minimalGenBank);
+    expect(result.byId.get("NC_000001")).toBe(10000);
+  });
+
+  it("returns canonical list in file order with correct lengths", () => {
+    const result = parseContigLengthsFromGenBank(minimalGenBank);
+    expect(result.canonical).toHaveLength(2);
+    expect(result.canonical[0].name).toBe("MyContig1");
+    expect(result.canonical[0].length).toBe(10000);
+    expect(result.canonical[1].name).toBe("MyContig2");
+    expect(result.canonical[1].length).toBe(5000);
+  });
+
+  it("includes VERSION in aliases", () => {
+    const result = parseContigLengthsFromGenBank(minimalGenBank);
+    expect(result.canonical[0].aliases).toContain("NC_000001.1");
+  });
+
+  it("returns empty result for non-GenBank text", () => {
+    const result = parseContigLengthsFromGenBank("not a genbank file");
+    expect(result.byId.size).toBe(0);
+    expect(result.canonical).toHaveLength(0);
   });
 });

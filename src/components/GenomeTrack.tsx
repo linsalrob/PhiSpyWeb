@@ -1,9 +1,11 @@
 import React, { useMemo } from "react";
 import type { ProphageCoordinate } from "../lib/phispyTypes";
+import type { ParsedContigLengths } from "../lib/genomeTrack";
 import { buildContigLayouts, coordToX } from "../lib/genomeTrack";
 
 interface GenomeTrackProps {
   coordinates: ProphageCoordinate[];
+  parsedLengths?: ParsedContigLengths;
 }
 
 const TRACK_WIDTH = 800;
@@ -11,13 +13,19 @@ const TRACK_HEIGHT = 28;
 const LABEL_WIDTH = 160;
 const ROW_GAP = 12;
 
-export const GenomeTrack: React.FC<GenomeTrackProps> = ({ coordinates }) => {
+export const GenomeTrack: React.FC<GenomeTrackProps> = ({ coordinates, parsedLengths }) => {
   const layouts = useMemo(
-    () => buildContigLayouts(coordinates),
-    [coordinates]
+    () => buildContigLayouts(coordinates, parsedLengths),
+    [coordinates, parsedLengths]
   );
 
-  if (coordinates.length === 0) return null;
+  // The longest contig defines 100% of TRACK_WIDTH
+  const maxLength = useMemo(
+    () => Math.max(1, ...layouts.map((l) => l.length)),
+    [layouts]
+  );
+
+  if (coordinates.length === 0 && layouts.length === 0) return null;
 
   const svgWidth = LABEL_WIDTH + TRACK_WIDTH + 20;
   const svgHeight =
@@ -34,6 +42,8 @@ export const GenomeTrack: React.FC<GenomeTrackProps> = ({ coordinates }) => {
       >
         {layouts.map((layout, idx) => {
           const y = ROW_GAP + idx * (TRACK_HEIGHT + ROW_GAP);
+          // Scale the contig bar to reflect its length relative to the longest contig
+          const contigBarWidth = coordToX(layout.length, maxLength, TRACK_WIDTH);
           return (
             <g key={layout.contig} transform={`translate(0, ${y})`}>
               {/* Contig label */}
@@ -48,20 +58,20 @@ export const GenomeTrack: React.FC<GenomeTrackProps> = ({ coordinates }) => {
                   : layout.contig}
               </text>
 
-              {/* Contig bar */}
+              {/* Contig bar – width proportional to longest contig */}
               <rect
                 x={LABEL_WIDTH}
                 y={TRACK_HEIGHT / 4}
-                width={TRACK_WIDTH}
+                width={Math.max(contigBarWidth, 2)}
                 height={TRACK_HEIGHT / 2}
                 rx={3}
                 fill="var(--color-contig)"
               />
 
-              {/* Prophage regions */}
+              {/* Prophage regions – all positions relative to maxLength */}
               {layout.prophages.map((ph, pi) => {
-                const x1 = coordToX(ph.start, layout.length, TRACK_WIDTH);
-                const x2 = coordToX(ph.stop, layout.length, TRACK_WIDTH);
+                const x1 = coordToX(ph.start, maxLength, TRACK_WIDTH);
+                const x2 = coordToX(ph.stop, maxLength, TRACK_WIDTH);
                 const w = Math.max(x2 - x1, 4);
                 return (
                   <g key={pi}>
