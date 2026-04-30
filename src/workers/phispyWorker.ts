@@ -1,10 +1,84 @@
 /// <reference lib="webworker" />
+/// <reference types="vite/client" />
 
 import { loadPyodide, type PyodideInterface } from "pyodide";
 
 // Pyodide version constant – update here to upgrade
 const PYODIDE_VERSION = "0.29.3";
 const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+
+type WheelManifest = {
+  phispy: {
+    version: string;
+    wheel: string;
+  };
+};
+
+async function getPhiSpyWheelUrl(): Promise<{ version: string; url: string }> {
+  const manifestUrl = new URL(
+    `${import.meta.env.BASE_URL}wheels/manifest.json`,
+    self.location.origin
+  ).toString();
+
+  postStatus("Fetching PhiSpy wheel manifest", { manifestUrl });
+
+  const response = await fetch(manifestUrl);
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch PhiSpy wheel manifest: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const manifest = (await response.json()) as WheelManifest;
+
+  if (!manifest.phispy?.wheel || !manifest.phispy?.version) {
+    throw new Error(
+      "Invalid PhiSpy wheel manifest: missing phispy.version or phispy.wheel"
+    );
+  }
+
+  const wheelUrl = new URL(
+    `${import.meta.env.BASE_URL}wheels/${manifest.phispy.wheel}`,
+    self.location.origin
+  ).toString();
+
+  return {
+    version: manifest.phispy.version,
+    url: wheelUrl,
+  };
+}
+
+async function verifyWheelUrl(url: string): Promise<void> {
+  let response = await fetch(url, { method: "HEAD" });
+
+  if (!response.ok) {
+    postStatus("PhiSpy wheel HEAD check failed; trying ranged GET probe", {
+      url,
+      status: response.status,
+      statusText: response.statusText,
+    });
+
+    // Use a single-byte ranged request so we verify reachability without
+    // downloading the full wheel (which micropip.install will fetch anyway).
+    response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" } });
+  }
+
+  postStatus("PhiSpy wheel URL check", {
+    url,
+    ok: response.ok,
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    contentLength: response.headers.get("content-length"),
+  });
+
+  // 206 Partial Content is also a success (ranged GET on a reachable resource).
+  if (!response.ok) {
+    throw new Error(
+      `PhiSpy wheel URL is not reachable: ${response.status} ${response.statusText}`
+    );
+  }
+}
 
 let pyodide: PyodideInterface | null = null;
 let phispyReady = false;
@@ -72,52 +146,57 @@ sys.version
   await withProgressTimeout("loadPackage(micropip)", pyodide.loadPackage("micropip"));
   postStatus("Finished loading micropip");
 
-  postStatus("Installing PhiSpy with micropip");
+  const { version, url } = await getPhiSpyWheelUrl();
+
+  postStatus("Installing PhiSpy wheel", {
+    version,
+    wheelUrl: url,
+  });
+
+  await verifyWheelUrl(url);
+
   await withProgressTimeout(
-    "micropip.install(phispy)",
+    "micropip.install(phispy wheel)",
     pyodide.runPythonAsync(`
 import micropip
-import sys
-
-# Install PhiSpy and its dependencies
-await micropip.install("phispy")
+await micropip.install(${JSON.stringify(url)})
 `)
   );
-  postStatus("Finished installing PhiSpy");
+  postStatus("Finished installing PhiSpy wheel", { version });
+
+  postStatus("Inspecting installed PhiSpy-related modules");
+  await pyodide.runPythonAsync(`
+import pkgutil
+
+mods = [
+    m.name for m in pkgutil.iter_modules()
+    if "phispy" in m.name.lower() or "phispymodules" in m.name.lower()
+]
+print("Matching installed modules:", mods)
+`);
 
   postStatus("Importing PhiSpy");
   await pyodide.runPythonAsync(`
 import phispy
-print("PhiSpy imported successfully")
+print("PhiSpy import succeeded")
 `);
-  postStatus("Finished importing PhiSpy");
+  postStatus("PhiSpy import succeeded");
 
-  postStatus("Running PhiSpy Pyodide dependency setup");
+  postStatus("Checking for PhiSpy Pyodide dependency setup");
   await withProgressTimeout(
     "phispy.ensure_pyodide_deps",
     pyodide.runPythonAsync(`
-import importlib
-import sys
+import phispy
 
-# Verify PhiSpy is importable
-spec = importlib.util.find_spec("PhiSpy")
-if spec is None:
-    spec = importlib.util.find_spec("phispy")
-if spec is None:
-    raise ImportError("PhiSpy package not found after installation")
-
-# Try to call Pyodide-specific setup if available
-try:
-    import phispy
-    if hasattr(phispy, 'ensure_pyodide_deps'):
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(phispy.ensure_pyodide_deps())
-except Exception as e:
-    # Not fatal – continue without Pyodide-specific setup
-    print(f"Note: Pyodide deps setup skipped: {e}", file=sys.stderr)
+if hasattr(phispy, "ensure_pyodide_deps"):
+    print("Running phispy.ensure_pyodide_deps()")
+    await phispy.ensure_pyodide_deps()
+    print("phispy.ensure_pyodide_deps() succeeded")
+else:
+    print("phispy.ensure_pyodide_deps() not found")
 `)
   );
-  postStatus("Finished PhiSpy Pyodide dependency setup");
+  postStatus("Finished PhiSpy Pyodide dependency setup check");
 
   phispyReady = true;
   postStatus("Pyodide and PhiSpy are ready");

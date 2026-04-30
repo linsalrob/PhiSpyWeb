@@ -20,9 +20,35 @@ PhiSpyWeb is a web front-end for [PhiSpy](https://github.com/linsalrob/PhiSpy), 
 
 All computation runs in your browser using a Web Worker and the Pyodide WebAssembly runtime. The genome file you upload is processed entirely on your local machine.
 
+## PhiSpy wheel included in this repository
+
+`public/wheels/phispy-5.0.6-py3-none-any.whl` (~18 MB) is committed directly to this repository.
+
+**Why is the wheel committed here?**
+
+Pyodide's `micropip` can only install packages in the browser if a directly fetchable wheel URL is available — it cannot build from source or install platform-native compiled wheels. PhiSpy is only published on PyPI as a source distribution (sdist) with a C++ extension (`PhiSpyRepeatFinder`), so `micropip.install("phispy")` fails in Pyodide.
+
+To work around this:
+
+1. A pure Python (`py3-none-any`) wheel is built from the PhiSpy 5.0.6 source. The C++ repeat-finder extension is made optional via a stub fallback (returns an empty list when the native extension is absent).
+2. The wheel is served as a static asset by PhiSpyWeb itself.
+3. `public/wheels/manifest.json` records the version and filename. The worker fetches the manifest, derives the wheel URL, and installs directly from that URL — no package index lookup needed.
+
+**Why does the wheel contain training data (~18 MB)?**
+
+PhiSpy bundles organism-specific training sets used by its random-forest classifier. These are included in the wheel to keep packaging simple. Reducing the wheel size is tracked in a separate issue.
+
+**Updating PhiSpy**
+
+To upgrade PhiSpy in a future release:
+
+1. Build or obtain a new `py3-none-any` wheel for the target version.
+2. Add it to `public/wheels/`.
+3. Update `public/wheels/manifest.json` with the new version and filename.
+4. Redeploy. No TypeScript changes are required.
+
 ---
 
-## Development
 
 ### Prerequisites
 
@@ -125,7 +151,7 @@ The app will be available at `https://<your-username>.github.io/PhiSpyWeb/`.
 ## Troubleshooting
 
 **PhiSpy fails to install**
-> Pyodide's micropip cannot install all native-code packages. If PhiSpy has compiled extensions that are not available as pure-Python wheels, the install will fail. Check the stderr log for details.
+> The worker installs PhiSpy from a self-hosted wheel (`public/wheels/phispy-5.0.6-py3-none-any.whl`) fetched via the manifest at `public/wheels/manifest.json`. If the wheel URL is unreachable, check that the deployment includes the `public/wheels/` directory and that GitHub Pages is serving the files correctly. Check the browser console / status log for the exact HTTP status reported during the wheel URL check.
 
 **Browser runs out of memory**
 > Try a smaller genome file or use a desktop browser with more available RAM.
@@ -176,6 +202,9 @@ PhiSpyWeb/
   public/
     examples/
       README.md
+    wheels/
+      manifest.json          # PhiSpy version manifest (single source of version string)
+      phispy-5.0.6-py3-none-any.whl  # Self-hosted pure Python wheel (~18 MB)
   src/
     App.tsx
     main.tsx

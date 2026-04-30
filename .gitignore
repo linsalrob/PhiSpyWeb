@@ -20,6 +20,8 @@ parts/
 sdist/
 var/
 wheels/
+# Allow the public wheel distribution directory for Pyodide
+!public/wheels/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
