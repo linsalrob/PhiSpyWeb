@@ -54,8 +54,8 @@ export const RunStatus: React.FC<RunStatusProps> = ({
               margin: 0,
               fontFamily: "monospace",
               fontSize: "0.8rem",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
+              wordBreak: "break-word",
+              overflowWrap: "break-word",
               lineHeight: 1.5,
             }}
           >

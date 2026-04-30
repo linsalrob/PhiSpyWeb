@@ -34,7 +34,11 @@ const initStart = performance.now();
 
 function postStatus(message: string, details?: Record<string, unknown>) {
   const elapsedMs = Math.round(performance.now() - initStart);
-  console.log("[PhiSpyWorker]", message, details ?? "");
+  if (details !== undefined) {
+    console.log("[PhiSpyWorker]", message, details);
+  } else {
+    console.log("[PhiSpyWorker]", message);
+  }
   postMessage({
     type: "status",
     message,
@@ -49,8 +53,9 @@ async function withProgressTimeout<T>(
   promise: Promise<T>,
   warnAfterMs = 30000
 ): Promise<T> {
+  const warnAfterSec = warnAfterMs / 1000;
   const timer = setTimeout(() => {
-    postStatus(`Still working: ${label} has been running for ${warnAfterMs / 1000} seconds`);
+    postStatus(`Still working: ${label} has been running for ${warnAfterSec} seconds`);
   }, warnAfterMs);
   try {
     return await promise;
@@ -67,7 +72,13 @@ async function initPyodide(): Promise<void> {
   });
 
   postStatus("Starting Pyodide importScripts");
-  importScripts(PYODIDE_JS_URL);
+  try {
+    importScripts(PYODIDE_JS_URL);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    postStatus("importScripts failed", { error: msg, url: PYODIDE_JS_URL });
+    throw err;
+  }
   postStatus("Finished Pyodide importScripts");
 
   postStatus("Calling loadPyodide");
