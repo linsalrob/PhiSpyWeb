@@ -7,6 +7,41 @@ import { loadPyodide, type PyodideInterface } from "pyodide";
 const PYODIDE_VERSION = "0.29.3";
 const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 
+// GitHub Releases API endpoint for the latest PhiSpy release
+const PHISPY_RELEASE_API_URL =
+  "https://api.github.com/repos/linsalrob/PhiSpy/releases/latest";
+
+// Optional pinned fallback wheel URL.  Set to a non-empty string to enable.
+// Used only when the GitHub Releases API lookup fails.
+const PHISPY_FALLBACK_WHEEL_URL = "";
+
+// ── GitHub Releases API types ─────────────────────────────────────────────────
+
+type GitHubReleaseAsset = {
+  name: string;
+  browser_download_url: string;
+  size?: number;
+  content_type?: string;
+};
+
+type GitHubRelease = {
+  tag_name: string;
+  name?: string;
+  html_url?: string;
+  assets: GitHubReleaseAsset[];
+};
+
+type PhiSpyWheelResolution = {
+  version: string;
+  tagName: string;
+  wheelName: string;
+  wheelUrl: string;
+  releaseUrl?: string;
+  size?: number;
+};
+
+// ── Local-manifest fallback types ────────────────────────────────────────────
+
 type WheelManifest = {
   phispy: {
     version: string;
@@ -14,13 +49,94 @@ type WheelManifest = {
   };
 };
 
-async function getPhiSpyWheelUrl(): Promise<{ version: string; url: string }> {
+// ── Wheel resolvers ───────────────────────────────────────────────────────────
+
+async function resolveLatestPhiSpyPyodideWheel(): Promise<PhiSpyWheelResolution> {
+  postStatus("Fetching latest PhiSpy release metadata", {
+    releaseApiUrl: PHISPY_RELEASE_API_URL,
+  });
+
+  const response = await fetch(PHISPY_RELEASE_API_URL, {
+    headers: {
+      Accept: "application/vnd.github+json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch latest PhiSpy release metadata: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const release = (await response.json()) as GitHubRelease;
+
+  if (!release.assets || release.assets.length === 0) {
+    throw new Error(
+      `Latest PhiSpy release ${release.tag_name} has no downloadable assets`
+    );
+  }
+
+  postStatus("Found latest PhiSpy release", {
+    tagName: release.tag_name,
+    releaseUrl: release.html_url,
+    assetNames: release.assets.map((asset) => asset.name),
+  });
+
+  const wheelCandidates = release.assets.filter((asset) => {
+    const name = asset.name.toLowerCase();
+    return (
+      name.endsWith(".whl") &&
+      (name.includes("emscripten") ||
+        name.includes("pyodide") ||
+        name.includes("wasm32") ||
+        name.includes("py3-none-any"))
+    );
+  });
+
+  if (wheelCandidates.length === 0) {
+    throw new Error(
+      `No Pyodide/Emscripten-compatible PhiSpy wheel found on release ${release.tag_name}. ` +
+        `Available assets: ${release.assets.map((asset) => asset.name).join(", ")}`
+    );
+  }
+
+  // Prefer explicit Emscripten/Pyodide/WASM wheels over generic pure-Python wheels.
+  wheelCandidates.sort((a, b) => {
+    const score = (asset: GitHubReleaseAsset) => {
+      const name = asset.name.toLowerCase();
+      if (name.includes("emscripten")) return 0;
+      if (name.includes("pyodide")) return 1;
+      if (name.includes("wasm32")) return 2;
+      if (name.includes("py3-none-any")) return 3;
+      return 9;
+    };
+    return score(a) - score(b);
+  });
+
+  const wheel = wheelCandidates[0];
+
+  return {
+    version: release.tag_name.replace(/^v/, ""),
+    tagName: release.tag_name,
+    releaseUrl: release.html_url,
+    wheelName: wheel.name,
+    wheelUrl: wheel.browser_download_url,
+    size: wheel.size,
+  };
+}
+
+async function getPhiSpyWheelUrlFromLocalManifest(): Promise<{
+  version: string;
+  url: string;
+}> {
   const manifestUrl = new URL(
     `${import.meta.env.BASE_URL}wheels/manifest.json`,
     self.location.origin
   ).toString();
 
-  postStatus("Fetching PhiSpy wheel manifest", { manifestUrl });
+  postStatus("Using PhiSpy wheel from local fallback manifest", {
+    manifestUrl,
+  });
 
   const response = await fetch(manifestUrl);
 
@@ -53,15 +169,13 @@ async function verifyWheelUrl(url: string): Promise<void> {
   let response = await fetch(url, { method: "HEAD" });
 
   if (!response.ok) {
-    postStatus("PhiSpy wheel HEAD check failed; trying ranged GET probe", {
+    postStatus("PhiSpy wheel HEAD check failed; trying GET check", {
       url,
       status: response.status,
       statusText: response.statusText,
     });
 
-    // Use a single-byte ranged request so we verify reachability without
-    // downloading the full wheel (which micropip.install will fetch anyway).
-    response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" } });
+    response = await fetch(url, { method: "GET" });
   }
 
   postStatus("PhiSpy wheel URL check", {
@@ -72,7 +186,6 @@ async function verifyWheelUrl(url: string): Promise<void> {
     contentLength: response.headers.get("content-length"),
   });
 
-  // 206 Partial Content is also a success (ranged GET on a reachable resource).
   if (!response.ok) {
     throw new Error(
       `PhiSpy wheel URL is not reachable: ${response.status} ${response.statusText}`
@@ -146,23 +259,76 @@ sys.version
   await withProgressTimeout("loadPackage(micropip)", pyodide.loadPackage("micropip"));
   postStatus("Finished loading micropip");
 
-  const { version, url } = await getPhiSpyWheelUrl();
+  // Resolve wheel URL: try GitHub Releases first, then optional pinned fallback,
+  // then the local manifest as a last resort.
+  let wheelUrl: string;
+  let wheelVersion: string;
+  let wheelName: string | undefined;
 
-  postStatus("Installing PhiSpy wheel", {
-    version,
-    wheelUrl: url,
-  });
+  try {
+    const wheel = await resolveLatestPhiSpyPyodideWheel();
 
-  await verifyWheelUrl(url);
+    postStatus("Installing latest PhiSpy Pyodide wheel", {
+      version: wheel.version,
+      tagName: wheel.tagName,
+      wheelName: wheel.wheelName,
+      wheelUrl: wheel.wheelUrl,
+      releaseUrl: wheel.releaseUrl,
+      size: wheel.size,
+    });
+
+    wheelUrl = wheel.wheelUrl;
+    wheelVersion = wheel.version;
+    wheelName = wheel.wheelName;
+  } catch (error) {
+    if (PHISPY_FALLBACK_WHEEL_URL) {
+      postStatus(
+        "Latest PhiSpy release lookup failed; using fallback wheel URL",
+        {
+          error: String(error),
+          fallbackUrl: PHISPY_FALLBACK_WHEEL_URL,
+        }
+      );
+      wheelUrl = PHISPY_FALLBACK_WHEEL_URL;
+      wheelVersion = "unknown (fallback)";
+    } else {
+      // No pinned fallback – try the local manifest as a last resort.
+      postStatus(
+        "Latest PhiSpy release lookup failed; falling back to local manifest",
+        { error: String(error) }
+      );
+      const local = await getPhiSpyWheelUrlFromLocalManifest();
+      wheelUrl = local.url;
+      wheelVersion = local.version;
+    }
+  }
+
+  await verifyWheelUrl(wheelUrl);
 
   await withProgressTimeout(
     "micropip.install(phispy wheel)",
     pyodide.runPythonAsync(`
 import micropip
-await micropip.install(${JSON.stringify(url)})
+await micropip.install(${JSON.stringify(wheelUrl)})
 `)
   );
-  postStatus("Finished installing PhiSpy wheel", { version });
+  postStatus("Finished installing PhiSpy wheel", {
+    version: wheelVersion,
+    ...(wheelName ? { wheelName } : {}),
+  });
+
+  await pyodide.runPythonAsync(`
+import importlib.metadata
+
+for dist_name in ("phispy", "PhiSpy"):
+    try:
+        print("PhiSpy distribution version:", importlib.metadata.version(dist_name))
+        break
+    except importlib.metadata.PackageNotFoundError:
+        pass
+else:
+    print("PhiSpy distribution version: unknown (distribution not found under 'phispy' or 'PhiSpy')")
+`);
 
   postStatus("Inspecting installed PhiSpy-related modules");
   await pyodide.runPythonAsync(`
