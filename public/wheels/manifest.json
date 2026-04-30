@@ -1,6 +1,8 @@
 {
   "phispy": {
-    "version": "5.0.6",
-    "wheel": "phispy-5.0.6-py3-none-any.whl"
+    "version": "5.0.10",
+    "tag": "v5.0.10",
+    "wheel": "phispy-5.0.10-cp313-cp313-pyodide_2025_0_wasm32.whl",
+    "source": "https://github.com/linsalrob/PhiSpy/releases/download/v5.0.10/phispy-5.0.10-cp313-cp313-pyodide_2025_0_wasm32.whl"
   }
 }

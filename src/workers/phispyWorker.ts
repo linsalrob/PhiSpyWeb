@@ -11,14 +11,7 @@ const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/f
 const PHISPY_RELEASE_API_URL =
   "https://api.github.com/repos/linsalrob/PhiSpy/releases/latest";
 
-// URL prefix for GitHub release asset downloads.  Browser-side fetch() may
-// fail for these URLs due to CORS/redirects, so we skip the verification step.
-const PHISPY_RELEASE_DOWNLOAD_URL_PREFIX =
-  "https://github.com/linsalrob/PhiSpy/releases/download/";
 
-// Optional pinned fallback wheel URL.  Set to a non-empty string to enable.
-// Used only when the GitHub Releases API lookup fails.
-const PHISPY_FALLBACK_WHEEL_URL = "";
 
 // ── GitHub Releases API types ─────────────────────────────────────────────────
 
@@ -45,12 +38,14 @@ type PhiSpyWheelResolution = {
   size?: number;
 };
 
-// ── Local-manifest fallback types ────────────────────────────────────────────
+// ── Local-manifest types ──────────────────────────────────────────────────────
 
 type WheelManifest = {
   phispy: {
     version: string;
+    tag?: string;
     wheel: string;
+    source?: string;
   };
 };
 
@@ -146,14 +141,17 @@ async function resolveLatestPhiSpyPyodideWheel(
 
 async function getPhiSpyWheelUrlFromLocalManifest(): Promise<{
   version: string;
+  tag?: string;
+  wheel: string;
   url: string;
+  source?: string;
 }> {
   const manifestUrl = new URL(
     `${import.meta.env.BASE_URL}wheels/manifest.json`,
     self.location.origin
   ).toString();
 
-  postStatus("Using PhiSpy wheel from local fallback manifest", {
+  postStatus("Using PhiSpy wheel from PhiSpyWeb static wheels manifest", {
     manifestUrl,
   });
 
@@ -180,7 +178,10 @@ async function getPhiSpyWheelUrlFromLocalManifest(): Promise<{
 
   return {
     version: manifest.phispy.version,
+    tag: manifest.phispy.tag,
+    wheel: manifest.phispy.wheel,
     url: wheelUrl,
+    source: manifest.phispy.source,
   };
 }
 
@@ -292,64 +293,47 @@ import sys
   postStatus("Detected Pyodide Python version", pythonVersionInfo.toJs({ dict_converter: (entries: Iterable<[string, unknown]>) => Object.fromEntries(entries) }));
   const pyTag = `cp${pythonVersionInfo.get("major")}${pythonVersionInfo.get("minor")}`;
 
-  // Resolve wheel URL: try GitHub Releases first, then optional pinned fallback,
-  // then the local manifest as a last resort.
+  // Resolve the wheel to install from the local static manifest (pre-populated
+  // by scripts/sync-latest-phispy-wheel.mjs).  The GitHub Releases API is still
+  // used separately to log which version is available upstream, but the actual
+  // micropip.install() call always uses the mirrored wheel on the PhiSpyWeb
+  // GitHub Pages origin to avoid GitHub release CORS restrictions.
   let wheelUrl: string;
   let wheelVersion: string;
   let wheelName: string | undefined;
 
+  // Log the latest upstream release for informational purposes.
   try {
-    const wheel = await resolveLatestPhiSpyPyodideWheel(pyTag);
-
-    postStatus("Installing latest PhiSpy Pyodide wheel", {
-      version: wheel.version,
-      tagName: wheel.tagName,
-      wheelName: wheel.wheelName,
-      wheelUrl: wheel.wheelUrl,
-      releaseUrl: wheel.releaseUrl,
-      size: wheel.size,
+    const upstream = await resolveLatestPhiSpyPyodideWheel(pyTag);
+    postStatus("Latest PhiSpy upstream wheel identified (informational)", {
+      version: upstream.version,
+      tagName: upstream.tagName,
+      wheelName: upstream.wheelName,
+      source: upstream.wheelUrl,
     });
-
-    wheelUrl = wheel.wheelUrl;
-    wheelVersion = wheel.version;
-    wheelName = wheel.wheelName;
   } catch (error) {
-    if (PHISPY_FALLBACK_WHEEL_URL) {
-      postStatus(
-        "Latest PhiSpy release lookup failed; using fallback wheel URL",
-        {
-          error: String(error),
-          fallbackUrl: PHISPY_FALLBACK_WHEEL_URL,
-        }
-      );
-      wheelUrl = PHISPY_FALLBACK_WHEEL_URL;
-      wheelVersion = "unknown (fallback)";
-    } else {
-      // No pinned fallback – try the local manifest as a last resort.
-      postStatus(
-        "Latest PhiSpy release lookup failed; falling back to local manifest",
-        { error: String(error) }
-      );
-      const local = await getPhiSpyWheelUrlFromLocalManifest();
-      wheelUrl = local.url;
-      wheelVersion = local.version;
-    }
-  }
-
-  // GitHub release asset download URLs may fail browser-side fetch() due to
-  // CORS restrictions and redirects even though they work as normal download
-  // links.  Skip the HEAD/GET verification for those URLs.
-  const isGitHubReleaseAsset = wheelUrl.startsWith(PHISPY_RELEASE_DOWNLOAD_URL_PREFIX);
-
-  if (isGitHubReleaseAsset) {
-    postStatus("Skipping browser fetch verification for GitHub release asset", {
-      reason:
-        "GitHub release download URLs may fail browser HEAD/fetch due to CORS or redirects",
-      wheelUrl,
+    postStatus("Could not fetch upstream PhiSpy release info (non-fatal)", {
+      error: String(error),
     });
-  } else {
-    await verifyWheelUrl(wheelUrl);
   }
+
+  // Always install from the local static wheel served from this origin.
+  const local = await getPhiSpyWheelUrlFromLocalManifest();
+  wheelUrl = local.url;
+  wheelVersion = local.version;
+  wheelName = local.wheel;
+
+  postStatus("Installing PhiSpy wheel from PhiSpyWeb static wheels", {
+    version: wheelVersion,
+    tag: local.tag,
+    wheelName,
+    wheelUrl,
+    source: local.source,
+  });
+
+  postStatus(`Installing PhiSpy wheel from ${wheelUrl}`);
+
+  await verifyWheelUrl(wheelUrl);
 
   postStatus("Installing PhiSpy wheel with micropip", {
     wheelName,
