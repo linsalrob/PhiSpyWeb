@@ -175,25 +175,42 @@ mods = [
 print("Matching installed modules:", mods)
 `);
 
-  postStatus("Importing PhiSpy");
+  // The PyPI/distribution package is PhiSpy and the console script is `phispy`,
+  // but the importable Python package is `PhiSpyModules`.
+  postStatus("Importing PhiSpyModules");
   await pyodide.runPythonAsync(`
-import phispy
-print("PhiSpy import succeeded")
+import PhiSpyModules
+import pkgutil
+
+print("PhiSpyModules imported successfully")
+print("PhiSpyModules file:", getattr(PhiSpyModules, "__file__", None))
+print("PhiSpyModules attributes:", sorted([a for a in dir(PhiSpyModules) if "pyodide" in a.lower() or "ensure" in a.lower()]))
+
+mods = [
+    m.name for m in pkgutil.iter_modules(PhiSpyModules.__path__)
+    if "pyodide" in m.name.lower() or "main" in m.name.lower()
+]
+print("Relevant PhiSpyModules submodules:", mods)
 `);
-  postStatus("PhiSpy import succeeded");
+  postStatus("PhiSpyModules import succeeded");
 
-  postStatus("Checking for PhiSpy Pyodide dependency setup");
+  postStatus("Checking for PhiSpyModules Pyodide dependency setup");
   await withProgressTimeout(
-    "phispy.ensure_pyodide_deps",
+    "PhiSpyModules.ensure_pyodide_deps",
     pyodide.runPythonAsync(`
-import phispy
-
-if hasattr(phispy, "ensure_pyodide_deps"):
-    print("Running phispy.ensure_pyodide_deps()")
-    await phispy.ensure_pyodide_deps()
-    print("phispy.ensure_pyodide_deps() succeeded")
-else:
-    print("phispy.ensure_pyodide_deps() not found")
+try:
+    from PhiSpyModules import ensure_pyodide_deps
+    print("Found ensure_pyodide_deps in PhiSpyModules")
+    await ensure_pyodide_deps()
+    print("ensure_pyodide_deps succeeded from PhiSpyModules")
+except ImportError:
+    try:
+        from PhiSpyModules.pyodide_deps import ensure_pyodide_deps
+        print("Found ensure_pyodide_deps in PhiSpyModules.pyodide_deps")
+        await ensure_pyodide_deps()
+        print("ensure_pyodide_deps succeeded from PhiSpyModules.pyodide_deps")
+    except ImportError:
+        print("No ensure_pyodide_deps function found; continuing without it")
 `)
   );
   postStatus("Finished PhiSpy Pyodide dependency setup check");
@@ -235,11 +252,12 @@ os.makedirs("/work/output", exist_ok=True)
 
   await pyodide.runPythonAsync(`
 import sys
-import os
 
-# PhiSpy CLI entry point – discovered by inspecting the installed package
-# PhiSpy provides a console_scripts entry point at PhiSpy.main:main
-# We emulate the CLI by setting sys.argv and calling the entry point.
+# The PyPI/distribution package is PhiSpy and the console script is \`phispy\`,
+# but the importable Python package is PhiSpyModules.
+# The package metadata maps both PhiSpy.py and phispy console scripts to
+# PhiSpyModules.main:run, so we call that entry point directly.
+from PhiSpyModules.main import run
 
 input_path = "/work/input/input.gbk"
 output_dir = "/work/output"
@@ -258,29 +276,7 @@ sys.argv = [
     "--output_choice", str(output_choice),
 ]
 
-# Try to find and call the correct PhiSpy entry point
-try:
-    # PhiSpy >= 4.x: entry point is PhiSpy.main
-    from PhiSpy import main as phispy_main
-    phispy_main()
-except ImportError:
-    try:
-        # Alternative: phispy package with main module
-        import phispy.main as pm
-        if hasattr(pm, 'main'):
-            pm.main()
-        else:
-            # Fallback: find the script in the package
-            import runpy
-            import PhiSpy
-            pkg_dir = os.path.dirname(PhiSpy.__file__)
-            script = os.path.join(pkg_dir, "PhiSpy.py")
-            if os.path.exists(script):
-                runpy.run_path(script, run_name="__main__")
-            else:
-                raise RuntimeError(f"Cannot find PhiSpy entry point in {pkg_dir}")
-    except ImportError as e:
-        raise RuntimeError(f"Cannot import PhiSpy: {e}")
+run()
 `);
 
   postMessage({ type: "status", message: "Collecting output files…" });
