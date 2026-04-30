@@ -53,13 +53,15 @@ async function verifyWheelUrl(url: string): Promise<void> {
   let response = await fetch(url, { method: "HEAD" });
 
   if (!response.ok) {
-    postStatus("PhiSpy wheel HEAD check failed; trying GET check", {
+    postStatus("PhiSpy wheel HEAD check failed; trying ranged GET probe", {
       url,
       status: response.status,
       statusText: response.statusText,
     });
 
-    response = await fetch(url, { method: "GET" });
+    // Use a single-byte ranged request so we verify reachability without
+    // downloading the full wheel (which micropip.install will fetch anyway).
+    response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" } });
   }
 
   postStatus("PhiSpy wheel URL check", {
@@ -70,6 +72,7 @@ async function verifyWheelUrl(url: string): Promise<void> {
     contentLength: response.headers.get("content-length"),
   });
 
+  // 206 Partial Content is also a success (ranged GET on a reachable resource).
   if (!response.ok) {
     throw new Error(
       `PhiSpy wheel URL is not reachable: ${response.status} ${response.statusText}`
