@@ -10,6 +10,8 @@ import { LogViewer } from "./components/LogViewer";
 import { PhiSpyWorkerClient } from "./lib/workerClient";
 import type { PhiSpyRunParameters, PhiSpyRunResult, RunState } from "./lib/phispyTypes";
 import { defaultParams } from "./lib/phispyTypes";
+import type { ParsedContigLengths } from "./lib/genomeTrack";
+import { parseContigLengthsFromGenBank } from "./lib/genomeTrack";
 
 export default function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -19,6 +21,7 @@ export default function App() {
   const [stdout, setStdout] = useState<string[]>([]);
   const [stderr, setStderr] = useState<string[]>([]);
   const [result, setResult] = useState<PhiSpyRunResult | null>(null);
+  const [parsedLengths, setParsedLengths] = useState<ParsedContigLengths | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [errorDetails, setErrorDetails] = useState<string | undefined>();
 
@@ -55,6 +58,7 @@ export default function App() {
 
     // Reset state for new run
     setResult(null);
+    setParsedLengths(undefined);
     setError(undefined);
     setErrorDetails(undefined);
     setStatusMessages([]);
@@ -78,7 +82,16 @@ export default function App() {
       setRunState("running");
       addStatus("Reading file…");
 
-      const buffer = await selectedFile.arrayBuffer();
+      const [buffer, genbankText] = await Promise.all([
+        selectedFile.arrayBuffer(),
+        selectedFile.text(),
+      ]);
+
+      // Parse contig lengths from the GenBank file for the genome track
+      const parsed = parseContigLengthsFromGenBank(genbankText);
+      if (parsed.canonical.length > 0) {
+        setParsedLengths(parsed);
+      }
 
       addStatus(`Starting PhiSpy on ${selectedFile.name}…`);
 
@@ -189,7 +202,7 @@ export default function App() {
             {result.coordinates.length > 0 && (
               <div className="card">
                 <h2>Genome Track</h2>
-                <GenomeTrack coordinates={result.coordinates} />
+                <GenomeTrack coordinates={result.coordinates} parsedLengths={parsedLengths} />
               </div>
             )}
 
