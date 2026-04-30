@@ -11,6 +11,11 @@ const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/f
 const PHISPY_RELEASE_API_URL =
   "https://api.github.com/repos/linsalrob/PhiSpy/releases/latest";
 
+// URL prefix for GitHub release asset downloads.  Browser-side fetch() may
+// fail for these URLs due to CORS/redirects, so we skip the verification step.
+const PHISPY_RELEASE_DOWNLOAD_URL_PREFIX =
+  "https://github.com/linsalrob/PhiSpy/releases/download/";
+
 // Optional pinned fallback wheel URL.  Set to a non-empty string to enable.
 // Used only when the GitHub Releases API lookup fails.
 const PHISPY_FALLBACK_WHEEL_URL = "";
@@ -51,7 +56,9 @@ type WheelManifest = {
 
 // ── Wheel resolvers ───────────────────────────────────────────────────────────
 
-async function resolveLatestPhiSpyPyodideWheel(): Promise<PhiSpyWheelResolution> {
+async function resolveLatestPhiSpyPyodideWheel(
+  pyTag?: string
+): Promise<PhiSpyWheelResolution> {
   postStatus("Fetching latest PhiSpy release metadata", {
     releaseApiUrl: PHISPY_RELEASE_API_URL,
   });
@@ -100,20 +107,32 @@ async function resolveLatestPhiSpyPyodideWheel(): Promise<PhiSpyWheelResolution>
     );
   }
 
-  // Prefer explicit Emscripten/Pyodide/WASM wheels over generic pure-Python wheels.
+  // Prefer wheels that match the running Python version (e.g. cp313 > cp312 > generic).
+  // Within the same Python-version tier, prefer explicit Emscripten/Pyodide/WASM wheels
+  // over generic pure-Python wheels.
   wheelCandidates.sort((a, b) => {
     const score = (asset: GitHubReleaseAsset) => {
       const name = asset.name.toLowerCase();
-      if (name.includes("emscripten")) return 0;
-      if (name.includes("pyodide")) return 1;
-      if (name.includes("wasm32")) return 2;
-      if (name.includes("py3-none-any")) return 3;
+      // Tier 0: exact cpXY match for the running interpreter
+      if (pyTag && name.includes(pyTag)) return 0;
+      // Tier 1–4: platform-specific wheels without a matching cp tag
+      if (name.includes("emscripten")) return 1;
+      if (name.includes("pyodide")) return 2;
+      if (name.includes("wasm32")) return 3;
+      if (name.includes("py3-none-any")) return 4;
       return 9;
     };
     return score(a) - score(b);
   });
 
   const wheel = wheelCandidates[0];
+
+  postStatus("Selected PhiSpy Pyodide wheel", {
+    tagName: release.tag_name,
+    wheelName: wheel.name,
+    wheelUrl: wheel.browser_download_url,
+    size: wheel.size,
+  });
 
   return {
     version: release.tag_name.replace(/^v/, ""),
@@ -259,6 +278,20 @@ sys.version
   await withProgressTimeout("loadPackage(micropip)", pyodide.loadPackage("micropip"));
   postStatus("Finished loading micropip");
 
+  // Detect the Python version running inside Pyodide so we can prefer the
+  // matching wheel (e.g. cp313 for Python 3.13).
+  const pythonVersionInfo = await pyodide.runPythonAsync(`
+import sys
+{
+    "major": sys.version_info.major,
+    "minor": sys.version_info.minor,
+    "cache_tag": sys.implementation.cache_tag,
+    "version": sys.version,
+}
+`);
+  postStatus("Detected Pyodide Python version", pythonVersionInfo.toJs({ dict_converter: (entries: Iterable<[string, unknown]>) => Object.fromEntries(entries) }));
+  const pyTag = `cp${pythonVersionInfo.get("major")}${pythonVersionInfo.get("minor")}`;
+
   // Resolve wheel URL: try GitHub Releases first, then optional pinned fallback,
   // then the local manifest as a last resort.
   let wheelUrl: string;
@@ -266,7 +299,7 @@ sys.version
   let wheelName: string | undefined;
 
   try {
-    const wheel = await resolveLatestPhiSpyPyodideWheel();
+    const wheel = await resolveLatestPhiSpyPyodideWheel(pyTag);
 
     postStatus("Installing latest PhiSpy Pyodide wheel", {
       version: wheel.version,
@@ -303,15 +336,43 @@ sys.version
     }
   }
 
-  await verifyWheelUrl(wheelUrl);
+  // GitHub release asset download URLs may fail browser-side fetch() due to
+  // CORS restrictions and redirects even though they work as normal download
+  // links.  Skip the HEAD/GET verification for those URLs.
+  const isGitHubReleaseAsset = wheelUrl.startsWith(PHISPY_RELEASE_DOWNLOAD_URL_PREFIX);
 
-  await withProgressTimeout(
-    "micropip.install(phispy wheel)",
-    pyodide.runPythonAsync(`
+  if (isGitHubReleaseAsset) {
+    postStatus("Skipping browser fetch verification for GitHub release asset", {
+      reason:
+        "GitHub release download URLs may fail browser HEAD/fetch due to CORS or redirects",
+      wheelUrl,
+    });
+  } else {
+    await verifyWheelUrl(wheelUrl);
+  }
+
+  postStatus("Installing PhiSpy wheel with micropip", {
+    wheelName,
+    wheelUrl,
+  });
+
+  try {
+    await withProgressTimeout(
+      "micropip.install(phispy wheel)",
+      pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${JSON.stringify(wheelUrl)})
 `)
-  );
+    );
+  } catch (err) {
+    postStatus("micropip.install failed for selected PhiSpy wheel", {
+      wheelName,
+      wheelUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+
   postStatus("Finished installing PhiSpy wheel", {
     version: wheelVersion,
     ...(wheelName ? { wheelName } : {}),
