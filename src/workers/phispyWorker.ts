@@ -2,6 +2,8 @@
 
 // Pyodide version constant – update here to upgrade
 const PYODIDE_VERSION = "0.27.0";
+const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+const PYODIDE_JS_URL = `${PYODIDE_BASE_URL}pyodide.js`;
 
 declare function importScripts(...urls: string[]): void;
 
@@ -28,33 +30,92 @@ declare function loadPyodide(opts: {
 let pyodide: Pyodide | null = null;
 let phispyReady = false;
 
-importScripts(
-  `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/pyodide.js`
-);
+const initStart = performance.now();
+
+function postStatus(message: string, details?: Record<string, unknown>) {
+  const elapsedMs = Math.round(performance.now() - initStart);
+  console.log("[PhiSpyWorker]", message, details ?? "");
+  postMessage({
+    type: "status",
+    message,
+    details,
+    timestamp: new Date().toISOString(),
+    elapsedMs,
+  });
+}
+
+async function withProgressTimeout<T>(
+  label: string,
+  promise: Promise<T>,
+  warnAfterMs = 30000
+): Promise<T> {
+  const timer = setTimeout(() => {
+    postStatus(`Still working: ${label} has been running for ${warnAfterMs / 1000} seconds`);
+  }, warnAfterMs);
+  try {
+    return await promise;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function initPyodide(): Promise<void> {
-  postMessage({ type: "status", message: "Loading Pyodide…" });
-
-  pyodide = await loadPyodide({
-    indexURL: `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`,
-    stdout: (text: string) => postMessage({ type: "stdout", text }),
-    stderr: (text: string) => postMessage({ type: "stderr", text }),
+  postStatus("Using Pyodide URLs", {
+    PYODIDE_VERSION,
+    PYODIDE_BASE_URL,
+    PYODIDE_JS_URL,
   });
 
-  postMessage({ type: "status", message: "Installing PhiSpy via micropip…" });
+  postStatus("Starting Pyodide importScripts");
+  importScripts(PYODIDE_JS_URL);
+  postStatus("Finished Pyodide importScripts");
 
-  await pyodide.loadPackage("micropip");
+  postStatus("Calling loadPyodide");
+  pyodide = await withProgressTimeout(
+    "loadPyodide",
+    loadPyodide({
+      indexURL: PYODIDE_BASE_URL,
+      stdout: (text: string) => postMessage({ type: "stdout", text }),
+      stderr: (text: string) => postMessage({ type: "stderr", text }),
+    })
+  );
+  postStatus("Finished loadPyodide");
 
-  await pyodide.runPythonAsync(`
+  postStatus("Running Pyodide smoke test");
+  const pythonVersion = await pyodide.runPythonAsync(`
+import sys
+sys.version
+`);
+  postStatus("Pyodide smoke test complete", { pythonVersion: String(pythonVersion) });
+
+  postStatus("Loading micropip");
+  await withProgressTimeout("loadPackage(micropip)", pyodide.loadPackage("micropip"));
+  postStatus("Finished loading micropip");
+
+  postStatus("Installing PhiSpy with micropip");
+  await withProgressTimeout(
+    "micropip.install(phispy)",
+    pyodide.runPythonAsync(`
 import micropip
 import sys
 
 # Install PhiSpy and its dependencies
 await micropip.install("phispy")
-`);
+`)
+  );
+  postStatus("Finished installing PhiSpy");
 
-  // Verify installation and set up any Pyodide-specific dependencies
+  postStatus("Importing PhiSpy");
   await pyodide.runPythonAsync(`
+import phispy
+print("PhiSpy imported successfully")
+`);
+  postStatus("Finished importing PhiSpy");
+
+  postStatus("Running PhiSpy Pyodide dependency setup");
+  await withProgressTimeout(
+    "phispy.ensure_pyodide_deps",
+    pyodide.runPythonAsync(`
 import importlib
 import sys
 
@@ -74,10 +135,13 @@ try:
 except Exception as e:
     # Not fatal – continue without Pyodide-specific setup
     print(f"Note: Pyodide deps setup skipped: {e}", file=sys.stderr)
-`);
+`)
+  );
+  postStatus("Finished PhiSpy Pyodide dependency setup");
 
   phispyReady = true;
-  postMessage({ type: "status", message: "ready" });
+  postStatus("Pyodide and PhiSpy are ready");
+  postMessage({ type: "status", message: "ready", timestamp: new Date().toISOString(), elapsedMs: Math.round(performance.now() - initStart) });
 }
 
 async function runPhiSpyInPyodide(
@@ -300,30 +364,40 @@ function findField(
 
 // Message handler
 self.onmessage = async (event: MessageEvent) => {
+  console.log("[PhiSpyWorker message]", event.data);
   const msg = event.data;
 
   if (msg.type === "init") {
+    postStatus("Worker received init request");
     if (phispyReady) {
-      postMessage({ type: "status", message: "ready" });
+      postMessage({ type: "status", message: "ready", timestamp: new Date().toISOString(), elapsedMs: Math.round(performance.now() - initStart) });
       return;
     }
     try {
       await initPyodide();
     } catch (err) {
+      const details = err instanceof Error ? (err.stack ?? err.message) : String(err);
+      console.error("[PhiSpyWorker] Pyodide/PhiSpy initialisation failed", err);
       postMessage({
         type: "error",
-        message: "Failed to initialise Pyodide/PhiSpy",
-        details: String(err),
+        message: "Pyodide/PhiSpy initialisation failed",
+        details,
+        timestamp: new Date().toISOString(),
+        elapsedMs: Math.round(performance.now() - initStart),
       });
     }
   } else if (msg.type === "run") {
     try {
       await runPhiSpyInPyodide(msg.filename, msg.fileBuffer, msg.params);
     } catch (err) {
+      const details = err instanceof Error ? (err.stack ?? err.message) : String(err);
+      console.error("[PhiSpyWorker] PhiSpy run failed", err);
       postMessage({
         type: "error",
         message: "PhiSpy run failed",
-        details: String(err),
+        details,
+        timestamp: new Date().toISOString(),
+        elapsedMs: Math.round(performance.now() - initStart),
       });
     }
   }

@@ -32,8 +32,10 @@ export default function App() {
     };
   }, []);
 
-  const addStatus = useCallback((msg: string) => {
-    setStatusMessages((prev) => [...prev, msg]);
+  const addStatus = useCallback((msg: string, elapsedMs?: number) => {
+    const prefix =
+      elapsedMs !== undefined ? `${(elapsedMs / 1000).toFixed(1)}s  ` : "";
+    setStatusMessages((prev) => [...prev, `${prefix}${msg}`]);
   }, []);
 
   const addLog = useCallback((text: string, stream: "stdout" | "stderr") => {
@@ -64,8 +66,8 @@ export default function App() {
 
     try {
       await worker.init(
-        (msg) => {
-          addStatus(msg);
+        (msg, elapsedMs) => {
+          addStatus(msg, elapsedMs);
           if (msg.includes("micropip") || msg.includes("PhiSpy") || msg.includes("Installing")) {
             setRunState("installing");
           }
@@ -84,8 +86,8 @@ export default function App() {
         selectedFile.name,
         buffer,
         params,
-        (msg) => {
-          addStatus(msg);
+        (msg, elapsedMs) => {
+          addStatus(msg, elapsedMs);
           if (msg.includes("Parsing") || msg.includes("Collecting")) {
             setRunState("parsing");
           }

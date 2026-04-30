@@ -37,10 +37,30 @@ export const RunStatus: React.FC<RunStatusProps> = ({
       </span>
 
       {messages.length > 0 && (
-        <div className="status-messages">
-          {messages.map((m, i) => (
-            <p key={i}>{m}</p>
-          ))}
+        <div
+          className="diagnostic-log"
+          style={{
+            marginTop: "0.75rem",
+            background: "var(--color-surface, #1e1e2e)",
+            border: "1px solid var(--color-border, #444)",
+            borderRadius: "4px",
+            padding: "0.6rem 0.75rem",
+            maxHeight: "16rem",
+            overflowY: "auto",
+          }}
+        >
+          <pre
+            style={{
+              margin: 0,
+              fontFamily: "monospace",
+              fontSize: "0.8rem",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              lineHeight: 1.5,
+            }}
+          >
+            {messages.join("\n")}
+          </pre>
         </div>
       )}
 

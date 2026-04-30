@@ -3,7 +3,7 @@ import type {
   PhiSpyRunResult,
 } from "./phispyTypes";
 
-type StatusCallback = (message: string) => void;
+type StatusCallback = (message: string, elapsedMs?: number) => void;
 type LogCallback = (text: string, stream: "stdout" | "stderr") => void;
 
 export class PhiSpyWorkerClient {
@@ -22,9 +22,10 @@ export class PhiSpyWorkerClient {
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const handler = (event: MessageEvent) => {
+        console.log("[PhiSpyWorker message]", event.data);
         const msg = event.data;
         if (msg.type === "status") {
-          onStatus(msg.message);
+          onStatus(msg.message, msg.elapsedMs);
           if (msg.message === "ready") {
             this.worker.removeEventListener("message", handler);
             resolve();
@@ -52,9 +53,10 @@ export class PhiSpyWorkerClient {
   ): Promise<PhiSpyRunResult> {
     return new Promise((resolve, reject) => {
       const handler = (event: MessageEvent) => {
+        console.log("[PhiSpyWorker message]", event.data);
         const msg = event.data;
         if (msg.type === "status") {
-          onStatus(msg.message);
+          onStatus(msg.message, msg.elapsedMs);
         } else if (msg.type === "stdout") {
           onLog(msg.text, "stdout");
         } else if (msg.type === "stderr") {
