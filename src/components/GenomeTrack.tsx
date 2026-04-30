@@ -12,6 +12,8 @@ const TRACK_WIDTH = 800;
 const TRACK_HEIGHT = 28;
 const LABEL_WIDTH = 160;
 const ROW_GAP = 12;
+const MIN_BAR_WIDTH = 2;
+const MIN_PROPHAGE_WIDTH = 4;
 
 export const GenomeTrack: React.FC<GenomeTrackProps> = ({ coordinates, parsedLengths }) => {
   const layouts = useMemo(
@@ -62,7 +64,7 @@ export const GenomeTrack: React.FC<GenomeTrackProps> = ({ coordinates, parsedLen
               <rect
                 x={LABEL_WIDTH}
                 y={TRACK_HEIGHT / 4}
-                width={Math.max(contigBarWidth, 2)}
+                width={Math.max(contigBarWidth, MIN_BAR_WIDTH)}
                 height={TRACK_HEIGHT / 2}
                 rx={3}
                 fill="var(--color-contig)"
@@ -72,7 +74,7 @@ export const GenomeTrack: React.FC<GenomeTrackProps> = ({ coordinates, parsedLen
               {layout.prophages.map((ph, pi) => {
                 const x1 = coordToX(ph.start, maxLength, TRACK_WIDTH);
                 const x2 = coordToX(ph.stop, maxLength, TRACK_WIDTH);
-                const w = Math.max(x2 - x1, 4);
+                const w = Math.max(x2 - x1, MIN_PROPHAGE_WIDTH);
                 return (
                   <g key={pi}>
                     <rect
