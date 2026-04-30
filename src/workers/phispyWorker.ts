@@ -1,33 +1,12 @@
 /// <reference lib="webworker" />
 
+import { loadPyodide, type PyodideInterface } from "pyodide";
+
 // Pyodide version constant – update here to upgrade
-const PYODIDE_VERSION = "0.27.0";
+const PYODIDE_VERSION = "0.29.3";
 const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
-const PYODIDE_JS_URL = `${PYODIDE_BASE_URL}pyodide.js`;
 
-declare function importScripts(...urls: string[]): void;
-
-interface Pyodide {
-  loadPackage(pkg: string | string[]): Promise<void>;
-  runPythonAsync(code: string): Promise<unknown>;
-  FS: {
-    mkdirTree(path: string): void;
-    writeFile(path: string, data: Uint8Array | string): void;
-    readFile(path: string, opts: { encoding: "utf8" }): string;
-    readdir(path: string): string[];
-    stat(path: string): { mode: number };
-    unlink(path: string): void;
-    rmdir(path: string): void;
-  };
-}
-
-declare function loadPyodide(opts: {
-  stdout?: (text: string) => void;
-  stderr?: (text: string) => void;
-  indexURL?: string;
-}): Promise<Pyodide>;
-
-let pyodide: Pyodide | null = null;
+let pyodide: PyodideInterface | null = null;
 let phispyReady = false;
 
 const initStart = performance.now();
@@ -68,19 +47,9 @@ async function initPyodide(): Promise<void> {
   postStatus("Using Pyodide URLs", {
     PYODIDE_VERSION,
     PYODIDE_BASE_URL,
-    PYODIDE_JS_URL,
   });
 
-  postStatus("Starting Pyodide importScripts");
-  try {
-    importScripts(PYODIDE_JS_URL);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    postStatus("importScripts failed", { error: msg, url: PYODIDE_JS_URL });
-    throw err;
-  }
-  postStatus("Finished Pyodide importScripts");
-
+  postStatus("Importing loadPyodide from pyodide package");
   postStatus("Calling loadPyodide");
   pyodide = await withProgressTimeout(
     "loadPyodide",
