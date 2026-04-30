@@ -252,6 +252,11 @@ os.makedirs("/work/output", exist_ok=True)
 
   await pyodide.runPythonAsync(`
 import sys
+import importlib.metadata
+
+# Print PhiSpy version to stderr before processing begins
+phispy_version = importlib.metadata.version("PhiSpy")
+print(f"Currently running PhiSpy version {phispy_version}", file=sys.stderr)
 
 # The PyPI/distribution package is PhiSpy and the console script is \`phispy\`,
 # but the importable Python package is PhiSpyModules.
