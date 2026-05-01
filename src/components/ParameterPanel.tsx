@@ -9,6 +9,7 @@ interface ParameterPanelProps {
   trainingSets: PhiSpyTrainingSetOption[];
   trainingSetsLoading?: boolean;
   trainingSetsError?: boolean;
+  trainingSetVersion?: string;
 }
 
 const OUTPUT_CHOICES = [
@@ -24,6 +25,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({
   trainingSets,
   trainingSetsLoading = false,
   trainingSetsError = false,
+  trainingSetVersion,
 }) => {
   const set = <K extends keyof PhiSpyRunParameters>(
     key: K,
@@ -109,11 +111,14 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({
 
         <div className="param-field">
           <label htmlFor="training-set">Training set</label>
-          <span className="param-hint">Reference genome used for phage gene prediction</span>
+          <span className="param-hint">
+            Reference genome used for phage gene prediction
+            {trainingSetVersion && ` (PhiSpy v${trainingSetVersion})`}
+          </span>
           {trainingSetsLoading ? (
             <span className="param-hint">Loading training sets…</span>
           ) : trainingSetsError ? (
-            <span className="param-hint">Training sets could not be loaded</span>
+            <span className="param-hint">⚠ Training sets could not be loaded; using built-in fallback list</span>
           ) : (
             <select
               id="training-set"

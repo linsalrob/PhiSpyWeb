@@ -1,4 +1,4 @@
-import type { PhiSpyTrainingSetOption } from "./phispyTypes";
+import type { PhiSpyTrainingSetOption, TrainingSetManifest } from "./phispyTypes";
 
 export function formatTrainingSetLabel(genomeFile: string): string {
   return genomeFile
@@ -28,6 +28,54 @@ export function parseTrainingSetList(text: string): PhiSpyTrainingSetOption[] {
       };
     })
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+}
+
+export function parseTrainingSetManifest(json: unknown): TrainingSetManifest {
+  if (
+    typeof json !== "object" ||
+    json === null ||
+    typeof (json as Record<string, unknown>).phispyVersion !== "string" ||
+    typeof (json as Record<string, unknown>).schemaVersion !== "number" ||
+    !Array.isArray((json as Record<string, unknown>).trainingSets)
+  ) {
+    throw new Error("Invalid training-sets.json: missing required fields");
+  }
+
+  const raw = json as {
+    phispyVersion: string;
+    schemaVersion: number;
+    trainingSets: unknown[];
+  };
+
+  const trainingSets: PhiSpyTrainingSetOption[] = raw.trainingSets.map(
+    (item, i) => {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        typeof (item as Record<string, unknown>).value !== "string" ||
+        typeof (item as Record<string, unknown>).label !== "string"
+      ) {
+        throw new Error(
+          `Invalid training-sets.json: trainingSets[${i}] is missing value or label`
+        );
+      }
+      const entry = item as Record<string, unknown>;
+      return {
+        value: entry.value as string,
+        label: entry.label as string,
+        count:
+          typeof entry.count === "number" ? entry.count : undefined,
+        genomeFile:
+          typeof entry.genomeFile === "string" ? entry.genomeFile : "",
+      };
+    }
+  );
+
+  return {
+    phispyVersion: raw.phispyVersion,
+    schemaVersion: raw.schemaVersion,
+    trainingSets,
+  };
 }
 
 export const FALLBACK_TRAINING_SETS: PhiSpyTrainingSetOption[] = ([

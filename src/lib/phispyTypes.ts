@@ -42,6 +42,12 @@ export type PhiSpyTrainingSetOption = {
   genomeFile: string;
 };
 
+export type TrainingSetManifest = {
+  phispyVersion: string;
+  schemaVersion: number;
+  trainingSets: PhiSpyTrainingSetOption[];
+};
+
 export type RunState =
   | "idle"
   | "loading"

@@ -429,36 +429,6 @@ except ImportError:
   phispyReady = true;
   postStatus("Pyodide and PhiSpy are ready");
 
-  // Fetch training sets and send them to the main thread
-  postStatus("Loading PhiSpy training sets");
-  try {
-    const trainingSetsText = await pyodide.runPythonAsync(`
-import sys
-import io
-import contextlib
-from PhiSpyModules.main import run
-
-buffer = io.StringIO()
-
-old_argv = sys.argv[:]
-try:
-    sys.argv = ["PhiSpy.py", "--list", "short"]
-    with contextlib.redirect_stdout(buffer):
-        run()
-finally:
-    sys.argv = old_argv
-
-buffer.getvalue()
-`);
-    postStatus("Loaded PhiSpy training sets");
-    postMessage({ type: "training_sets", text: String(trainingSetsText) });
-  } catch (err) {
-    postStatus("Could not load PhiSpy training sets (non-fatal)", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    postMessage({ type: "training_sets", text: "" });
-  }
-
   postMessage({ type: "status", message: "ready", timestamp: new Date().toISOString(), elapsedMs: Math.round(performance.now() - initStart) });
 }
 
