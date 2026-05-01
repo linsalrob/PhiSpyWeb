@@ -10,7 +10,7 @@ import { LogViewer } from "./components/LogViewer";
 import { PhiSpyWorkerClient } from "./lib/workerClient";
 import type { PhiSpyRunParameters, PhiSpyRunResult, PhiSpyTrainingSetOption, RunState } from "./lib/phispyTypes";
 import { defaultParams } from "./lib/phispyTypes";
-import { parseTrainingSetList, FALLBACK_TRAINING_SETS } from "./lib/parseTrainingSets";
+import { parseTrainingSetManifest, FALLBACK_TRAINING_SETS } from "./lib/parseTrainingSets";
 import type { ParsedContigLengths } from "./lib/genomeTrack";
 import { parseContigLengthsFromGenBank } from "./lib/genomeTrack";
 
@@ -28,6 +28,7 @@ export default function App() {
   const [trainingSets, setTrainingSets] = useState<PhiSpyTrainingSetOption[]>([]);
   const [trainingSetsLoading, setTrainingSetsLoading] = useState(true);
   const [trainingSetsError, setTrainingSetsError] = useState(false);
+  const [trainingSetVersion, setTrainingSetVersion] = useState<string | undefined>();
 
   const workerRef = useRef<PhiSpyWorkerClient | null>(null);
 
@@ -37,6 +38,51 @@ export default function App() {
     return () => {
       workerRef.current?.terminate();
     };
+  }, []);
+
+  // Load training sets from public/training-sets.json on page load
+  useEffect(() => {
+    const preferredDefault = "data/trainSet_Ecoli.txt";
+
+    const url = new URL(
+      `${import.meta.env.BASE_URL}training-sets.json`,
+      window.location.origin
+    ).toString();
+
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`Failed to fetch training-sets.json: ${res.status} ${res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((json) => {
+        const manifest = parseTrainingSetManifest(json);
+        const options = manifest.trainingSets;
+        const defaultTrainingSet =
+          options.find((o) => o.value === preferredDefault)?.value ??
+          options[0]?.value ??
+          "";
+        setTrainingSets(options);
+        setTrainingSetVersion(manifest.phispyVersion);
+        setTrainingSetsLoading(false);
+        setParams((prev) =>
+          prev.trainingSet === "" ? { ...prev, trainingSet: defaultTrainingSet } : prev
+        );
+      })
+      .catch((err: unknown) => {
+        console.warn("Could not load training-sets.json, using fallback:", err);
+        const defaultTrainingSet =
+          FALLBACK_TRAINING_SETS.find((o) => o.value === preferredDefault)?.value ??
+          FALLBACK_TRAINING_SETS[0]?.value ??
+          "";
+        setTrainingSets(FALLBACK_TRAINING_SETS);
+        setTrainingSetsError(true);
+        setTrainingSetsLoading(false);
+        setParams((prev) =>
+          prev.trainingSet === "" ? { ...prev, trainingSet: defaultTrainingSet } : prev
+        );
+      });
   }, []);
 
   const addStatus = useCallback((msg: string, elapsedMs?: number) => {
@@ -51,30 +97,6 @@ export default function App() {
     } else {
       setStderr((prev) => [...prev, text]);
     }
-  }, []);
-
-  const handleTrainingSets = useCallback((text: string) => {
-    const preferredDefault = "data/trainSet_Ecoli.txt";
-    let options: PhiSpyTrainingSetOption[];
-    if (text.trim()) {
-      try {
-        options = parseTrainingSetList(text);
-      } catch {
-        options = FALLBACK_TRAINING_SETS;
-        setTrainingSetsError(true);
-      }
-    } else {
-      options = FALLBACK_TRAINING_SETS;
-    }
-    const defaultTrainingSet =
-      options.find((o) => o.value === preferredDefault)?.value ??
-      options[0]?.value ??
-      "";
-    setTrainingSets(options);
-    setTrainingSetsLoading(false);
-    setParams((prev) =>
-      prev.trainingSet === "" ? { ...prev, trainingSet: defaultTrainingSet } : prev
-    );
   }, []);
 
   const handleRun = async () => {
@@ -104,8 +126,7 @@ export default function App() {
             setRunState("installing");
           }
         },
-        addLog,
-        handleTrainingSets
+        addLog
       );
 
       setRunState("running");
@@ -185,6 +206,7 @@ export default function App() {
               trainingSets={trainingSets}
               trainingSetsLoading={trainingSetsLoading}
               trainingSetsError={trainingSetsError}
+              trainingSetVersion={trainingSetVersion}
             />
           </div>
         </div>

@@ -5,7 +5,6 @@ import type {
 
 type StatusCallback = (message: string, elapsedMs?: number) => void;
 type LogCallback = (text: string, stream: "stdout" | "stderr") => void;
-type TrainingSetsCallback = (text: string) => void;
 
 export class PhiSpyWorkerClient {
   private worker: Worker;
@@ -19,8 +18,7 @@ export class PhiSpyWorkerClient {
 
   init(
     onStatus: StatusCallback,
-    onLog: LogCallback,
-    onTrainingSets?: TrainingSetsCallback
+    onLog: LogCallback
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const handler = (event: MessageEvent) => {
@@ -32,9 +30,6 @@ export class PhiSpyWorkerClient {
             this.worker.removeEventListener("message", handler);
             resolve();
           }
-        } else if (msg.type === "training_sets") {
-          console.log("[PhiSpyWorker message]", { type: msg.type });
-          onTrainingSets?.(msg.text);
         } else if (msg.type === "stdout") {
           console.log("[PhiSpyWorker message]", { type: msg.type, text: msg.text });
           onLog(msg.text, "stdout");

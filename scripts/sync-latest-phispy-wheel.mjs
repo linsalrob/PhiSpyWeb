@@ -24,6 +24,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..");
 const WHEELS_DIR = join(REPO_ROOT, "public", "wheels");
 const MANIFEST_PATH = join(WHEELS_DIR, "manifest.json");
+const TRAINING_SETS_PATH = join(REPO_ROOT, "public", "training-sets.json");
 
 const PHISPY_RELEASE_API_URL =
   "https://api.github.com/repos/linsalrob/PhiSpy/releases/latest";
@@ -151,6 +152,22 @@ async function main() {
     console.log(`Downloading wheel to ${destPath} …`);
     await downloadFile(selected.browser_download_url, destPath);
     console.log("Download complete.");
+  }
+
+  // Download training-sets.json
+  const trainingSetsAsset = release.assets.find(
+    (asset) => asset.name === "training-sets.json"
+  );
+
+  if (!trainingSetsAsset) {
+    console.warn(
+      `Warning: No training-sets.json asset found in release ${tagName}. ` +
+        `Available assets: ${release.assets.map((a) => a.name).join(", ")}`
+    );
+  } else {
+    console.log(`Downloading training-sets.json to ${TRAINING_SETS_PATH} …`);
+    await downloadFile(trainingSetsAsset.browser_download_url, TRAINING_SETS_PATH);
+    console.log("training-sets.json download complete.");
   }
 
   // Write manifest
