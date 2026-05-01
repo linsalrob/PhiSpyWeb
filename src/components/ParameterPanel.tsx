@@ -1,11 +1,14 @@
 import React from "react";
-import type { PhiSpyRunParameters } from "../lib/phispyTypes";
+import type { PhiSpyRunParameters, PhiSpyTrainingSetOption } from "../lib/phispyTypes";
 import { defaultParams } from "../lib/phispyTypes";
 
 interface ParameterPanelProps {
   params: PhiSpyRunParameters;
   onChange: (params: PhiSpyRunParameters) => void;
   disabled?: boolean;
+  trainingSets: PhiSpyTrainingSetOption[];
+  trainingSetsLoading?: boolean;
+  trainingSetsError?: boolean;
 }
 
 const OUTPUT_CHOICES = [
@@ -18,6 +21,9 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({
   params,
   onChange,
   disabled = false,
+  trainingSets,
+  trainingSetsLoading = false,
+  trainingSetsError = false,
 }) => {
   const set = <K extends keyof PhiSpyRunParameters>(
     key: K,
@@ -99,6 +105,29 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="param-field">
+          <label htmlFor="training-set">Training set</label>
+          <span className="param-hint">Reference genome used for phage gene prediction</span>
+          {trainingSetsLoading ? (
+            <span className="param-hint">Loading training sets…</span>
+          ) : trainingSetsError ? (
+            <span className="param-hint">Training sets could not be loaded</span>
+          ) : (
+            <select
+              id="training-set"
+              value={params.trainingSet}
+              onChange={(e) => set("trainingSet", e.target.value)}
+              disabled={disabled || trainingSets.length === 0}
+            >
+              {trainingSets.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
