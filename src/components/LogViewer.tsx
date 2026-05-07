@@ -8,6 +8,7 @@ interface LogViewerProps {
 export const LogViewer: React.FC<LogViewerProps> = ({ stdout, stderr }) => {
   const [tab, setTab] = useState<"stdout" | "stderr">("stdout");
   const logRef = useRef<HTMLDivElement>(null);
+  const tabLabel = tab === "stdout" ? "installation" : "phispy";
 
   const lines = tab === "stdout" ? stdout : stderr;
 
@@ -35,14 +36,14 @@ export const LogViewer: React.FC<LogViewerProps> = ({ stdout, stderr }) => {
             onClick={() => setTab("stdout")}
             type="button"
           >
-            stdout ({stdout.length})
+            Installation Log ({stdout.length})
           </button>
           <button
             className={`log-tab${tab === "stderr" ? " active" : ""}`}
             onClick={() => setTab("stderr")}
             type="button"
           >
-            stderr ({stderr.length})
+            PhiSpy Log ({stderr.length})
           </button>
         </div>
         <button
@@ -58,11 +59,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({ stdout, stderr }) => {
         ref={logRef}
         className="log-viewer"
         role="log"
-        aria-label={`${tab} log`}
+        aria-label={`${tabLabel} log`}
         aria-live="polite"
       >
         {lines.length === 0 ? (
-          <span className="log-empty">No {tab} output.</span>
+          <span className="log-empty">No {tabLabel} output.</span>
         ) : (
           lines.map((line, i) => (
             <div key={i} className={`log-${tab}`}>
